@@ -1,34 +1,11 @@
-/*
-  Données(envoyé):
-  0 !V{ID}#
-  1 !H{ID};{arg}#
-  2 !T{ID};{arg}#
-  3 !B{ID};{arg}#
-  Données(reçu):
-  A1
-  A0
-  ?
-*/
-
-//léo
 #include <Wire.h>
-//---
+#include <HX711.h>
+#include <SoftwareSerial.h>
 
-//Define emilien
-#include <HX711.h> //inclure la bibliothèque -> Emilien
-
-#define S0 2 //définir broche de sélection multiplexeur 
-#define S1 3  //définir broche de sélection multiplexeur 
+#define S0 2
+#define S1 3
 #define DOUT A2
 #define CLK A1
-float tableau[] = {46500 , 45100 , 44500 , 42000}; //valeur de calibration
-int pointeur [4] = {0, 1, 3, 2}; //définie l'ordre des capteurs pour éviter les conflits (binaire réfléchie)
-float tare [5];
-float val;
-float val_final;
-
-HX711 pesee (DOUT, CLK);
-//---
 
 #define bat A0
 #define detect 4
@@ -40,11 +17,13 @@ HX711 pesee (DOUT, CLK);
 #define HTU21DF_READREG       0xE7
 #define HTU21DF_RESET       0xFE
 
-boolean sVol = true, sHygro = true, sTemp = true, sBat = true;
-String text;
-boolean sendAlert = true;
+int pointeur [4] = {0, 1, 3, 2};
+float tare_array[] = {46500 , 45100 , 44500 , 42000};
+float tare [5];
 
-int etatDetect = 1, idRuche = 1; //Variable a modifié
+boolean sVol = true, sHygro = true, sTemp = true, sBat = true, sendAlert = true;
+
+int idRuche = 1;
 
 int bits[] = {8, 9, 10, 11, 12, 13};
 
@@ -54,61 +33,58 @@ int intervalleMasse[] = {5, 20};
 
 long instant = millis();
 
-int id = 0;
+String data = "";
 
-#include <SoftwareSerial.h>
+HX711 pesee (DOUT, CLK);
 SoftwareSerial xbee(5, 4);
 
 void setup() {
   Serial.begin(9600);
   xbee.begin(9600);
 
-  for (int index = 0 ; index <= 5 ; index++) {
+  setupBotan();
+  setupEmilien();
+  setupLeo();
+}
+
+void setupBotan() {
+  for (int index = 0 ; index <= 5 ; index++)
     pinMode(bits[index], INPUT_PULLUP);
-  }
 
   idRuche = getId();
+}
 
-  //Emilien setup
+void setupEmilien() {
   pinMode(S0, OUTPUT);
   pinMode(S1, OUTPUT);
 
-  for (int count = 0; count < 4 ; count++)
-  {
+  for (int count = 0; count < 4 ; count++) {
     digitalWrite(S0, bitRead(pointeur[count], 0));
     digitalWrite(S1, bitRead(pointeur [count], 1));
-    val = pesee.get_value(10);
-    tare[pointeur[count]] = val;
-    Serial.print("Tare :");
-
-    Serial.println(val);
+    tare[pointeur[count]] = pesee.get_value(10);
   }
-  //---
+}
 
+void setupLeo() {
   //Léo setup
   /*reset();
-  Wire.begin();
-  Wire.beginTransmission(0x40);
-  Wire.write(0xE7);
-  Wire.endTransmission();
-  Wire.requestFrom(HTU21DF_I2CADDR, 1);
-  if (Wire.read() == 0x2)
-  {
+    Wire.begin();
+    Wire.beginTransmission(0x40);
+    Wire.write(0xE7);
+    Wire.endTransmission();
+    Wire.requestFrom(HTU21DF_I2CADDR, 1);
+    if (Wire.read() == 0x2)
+    {
     Serial.println("HTU21d ok !");
-  }
-  else
-  {
+    }
+    else
+    {
     Serial.println("ERROR...");
-  }*/
+    }*/
   //---
 }
 
 void loop() {
-
-
-  checkAlert();
-
-  String data = "";
   while (xbee.available()) {
     char c = xbee.read();
     Serial.println("Receive char ->" + c);
@@ -120,24 +96,15 @@ void loop() {
       data += c;
     }
   }
+
   while (Serial.available()) {
     if (Serial.readString() == "t") {
       sendXbee(protocolBatterie());
     }
   }
 
-}
+  checkAlert();
 
-void parseData(String data) {
-  if (data.startsWith("?")) {
-    delay(idRuche * 3000);
-    sendXbee(protocol());
-  } else {
-    if (data.startsWith("A1")) resetAlert();
-    sendAlert = data.startsWith("A1");
-    Serial.println((sendAlert) ? "Activé" : "Désactivé");
-    xbee.flush();
-  }
 }
 
 void checkAlert() {
@@ -164,20 +131,34 @@ void checkAlert() {
     }
   }
 
-  //etatDetect = digitalRead(detect);
-  if (sVol && etatDetect == 0) {
+  boolean etatDetect = digitalRead(detect);
+  if (sVol && etatDetect) {
     sendXbee(protocolVol());
     sVol = false;
   }
-  if (!sVol && etatDetect == 1) {
+
+  if (!sVol && etatDetect == 1)
     sVol = true;
+
+}
+
+
+void parseData(String data) {
+  if (data.startsWith("?")) {
+    delay(idRuche * 3000);
+    sendXbee(protocol());
+  } else {
+    if (data.startsWith("A1")) resetAlert();
+    sendAlert = data.startsWith("A1");
+    Serial.println((sendAlert) ? "Activé" : "Désactivé");
+    xbee.flush();
   }
 }
 
 
 void sendXbee(String data) {
   xbee.print(data);
-  Serial.println("Envois > " + data);
+  Serial.println("Send (Xbee) > " + data);
 }
 
 void resetAlert() {
@@ -187,18 +168,22 @@ void resetAlert() {
 String protocolVol() {
   return "!V" + String(idRuche) + "#";
 }
+
 String protocolHygrometrie() {
   sHygro = false;
   return "!H" + String(idRuche) + ";" + String(getHumidity()) + "#";
 }
+
 String protocolTemperature() {
   sTemp = false;
   return "!T" + String(idRuche) + ";" + String(getTemperature()) + "#";
 }
+
 String protocolBatterie() {
   sBat = false;
   return "!B" + String(idRuche) + ";" + String(getBattery()) + "#";
 }
+
 String protocol() { //maxi
   return "D" + String(idRuche) + ";"  + String(getMasse()) + ";" + String(getTemperature()) + ";" + String(getHumidity()) + "#";
 }
@@ -208,100 +193,86 @@ float getBattery() {
   //return (float(BatteryValue)*5)/1023*2;
 }
 
-//Partie emilien
-
 float getMasse() {
-  /*val = 0;
-  for (byte count = 0; count < 4 ; count++)
-  {
+  int masse = 0;
+  for (byte count = 0; count < 4 ; count++) {
     digitalWrite(S0, bitRead(pointeur[count], 0));
     digitalWrite(S1, bitRead(pointeur[count], 1));
-    //
-   // Serial.print (pointeur[count]);
-    //Serial.print("-->");
-    val = val + (pesee.get_value(10) - tare[pointeur[count]]) / tableau[pointeur[count]];
+    masse += (pesee.get_value(10) - tare[pointeur[count]]) / tare_array[pointeur[count]];
   }
-  Serial.println (val);
-  Serial.print ("Mesure masse : ");
-  return val;*/
-  return random(5, 20);
+  return masse;
 }
 
-//--- Fin emilien
 
-void reset()
-{
+void reset() {
   Wire.beginTransmission(0x40);
   Wire.write(0xFE);
   Wire.endTransmission();
-  delay(15);
 }
 
 float getTemperature() {
   /*Wire.beginTransmission(HTU21DF_I2CADDR);
-  Wire.write(HTU21DF_READTEMP);
-  Wire.endTransmission();
+    Wire.write(HTU21DF_READTEMP);
+    Wire.endTransmission();
 
-  //Wire.begin();
-  Wire.requestFrom(HTU21DF_I2CADDR, 3);
-  while (!Wire.available()) {}
+    //Wire.begin();
+    Wire.requestFrom(HTU21DF_I2CADDR, 3);
+    while (!Wire.available()) {}
 
 
-  uint16_t t = Wire.read();
-  t <<= 8;
-  t |= Wire.read();
+    uint16_t t = Wire.read();
+    t <<= 8;
+    t |= Wire.read();
 
-  uint8_t crc = Wire.read();
+    uint8_t crc = Wire.read();
 
-  float temp = t;
-  temp *= 175.72;
-  temp /= 65536;
-  temp -= 46.85;
+    float temp = t;
+    temp *= 175.72;
+    temp /= 65536;
+    temp -= 46.85;
 
-  Serial.print("Temperature :");
-  Serial.print(String(temp) + "   ");
-  return temp;*/
-  return 2;
+    Serial.print("Temperature :");
+    Serial.print(String(temp) + "   ");
+    return temp;*/
+  return random(20, 60);
 }
 
 float getHumidity() {
   /*Wire.beginTransmission(HTU21DF_I2CADDR);
-  Wire.write(HTU21DF_READHUM);
-  Wire.endTransmission();
+    Wire.write(HTU21DF_READHUM);
+    Wire.endTransmission();
 
-  //Wire.begin();
-  Wire.requestFrom(HTU21DF_I2CADDR, 3);
-  while (!Wire.available()) {}
+    //Wire.begin();
+    Wire.requestFrom(HTU21DF_I2CADDR, 3);
+    while (!Wire.available()) {}
 
-  uint16_t h = Wire.read();
-  h <<= 8;
-  h |= Wire.read();
+    uint16_t h = Wire.read();
+    h <<= 8;
+    h |= Wire.read();
 
-  //uint8_t crc = Wire.read();
+    //uint8_t crc = Wire.read();
 
-  float hum = h;
-  hum *= 125;
-  hum /= 65536;
-  hum -= 6;
-  hum *= 1 / 0.9925785124;
-  hum += 6.9250595041;
-  Serial.print("Humidite :");
-  Serial.println(hum);
-  return hum;*/
+    float hum = h;
+    hum *= 125;
+    hum /= 65536;
+    hum -= 6;
+    hum *= 1 / 0.9925785124;
+    hum += 6.9250595041;
+    Serial.print("Humidite :");
+    Serial.println(hum);
+    return hum;*/
   return random(5, 20);
 }
 
 int getId() {
-  if ( id == 0) {
-    byte dizaine;
-    byte unit;
+  byte dizaine;
+  byte unit;
 
-    for (int index = 0 ; index <= 1 ; index++)
-      bitWrite(dizaine, index, !digitalRead(bits[index + 4]));
+  for (int index = 0 ; index <= 1 ; index++)
+    bitWrite(dizaine, index, !digitalRead(bits[index + 4]));
 
-    for (int index = 0 ; index <= 3 ; index++)
-      bitWrite(unit, index, !digitalRead(bits[index]));
+  for (int index = 0 ; index <= 3 ; index++)
+    bitWrite(unit, index, !digitalRead(bits[index]));
 
-    return id = 10 * dizaine + unit;
-  } return id;
+  return 10 * dizaine + unit;
 }
